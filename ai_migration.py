@@ -90,62 +90,48 @@ class MigrationAI:
             return self._process_large_sql(oracle_sql, **kwargs)
             
         prompt = f"""
-Act as an expert SQL-to-Databricks migration specialist with deep knowledge of constraint validation, schema emulation, and Delta Lake optimization. Your goal is to convert Oracle SQL DDL to Databricks SQL with 100% precision, ensuring the output matches strict schema requirements over default Spark behaviors.
+ Act as an expert SQL-to-Databricks migration specialist. Convert the provided Oracle DDL to Databricks SQL with 100% precision.
 
-### CORE REQUIREMENTS:
-==================
+**1. CONSTRAINT & STRUCTURE RULES:**
 
-1. ### CONSTRAINT VALIDATION & STRUCTURE
-    * **CONSTRAINT PLACEMENT:** Define `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` constraints as **Table-Level Constraints** at the end of the column list, before the closing parenthesis.
-    * **CONSTRAINT SYNTAX:** Use the format: `CONSTRAINT PK_[COLUMN_NAME] PRIMARY KEY (column_name)`.
-    * **NULLABILITY:** Columns intended for Primary Keys or Unique constraints MUST be explicitly defined with `NOT NULL` in the column list.
-    * **NO ENFORCEMENT:** Do NOT include the `ENFORCED` or `NOT ENFORCED` keywords.
-    * **STORAGE CLAUSE:** Every `CREATE TABLE` statement must end with the clause **`USING DELTA;`**.
-    * **CLEAN DDL:** Do NOT use `ALTER TABLE` statements or `TBLPROPERTIES` for constraints or defaults unless the source contains complex logic that cannot be handled inline.
+* **Table-Level Constraints:** Define PRIMARY KEY, UNIQUE, or FOREIGN KEY as Table-Level Constraints ONLY IF they are present in the source Oracle DDL. If the source has no PK, do not generate a constraint block.
+* **Format:** If present, place at the end of the column list using: CONSTRAINT PK_[COLUMN_NAME] PRIMARY KEY (column_name).
+* **Nullability:** if the Columns in PKs or Unique constraints MUST be explicitly defined as `NOT NULL`.
+* **No Enforcement:** Do NOT include `ENFORCED` or `NOT ENFORCED` keywords.
+* **Termination:** End every `CREATE TABLE` statement with **`USING DELTA;`**.
+* **Inlining:** Keep `DEFAULT` values and `NOT NULL` constraints inline; strip all Oracle storage clauses (TABLESPACE, PCTFREE, STORAGE, etc.).
+* **Clean DDL:** Do not use `ALTER TABLE` or `TBLPROPERTIES` for constraints or defaults.
+    No Inference: Do not infer, synthesize, or assume any constraints. If the source Oracle DDL does not contain CONSTRAINT, PRIMARY KEY, UNIQUE, or FOREIGN KEY, do not generate any constraints.
+    No PK by Naming: Do not treat columns named *_ID or similar as primary keys unless the source explicitly declares a PK.
+    Nullability: Do not add NOT NULL unless it is explicitly present in the source column definition.
+    Exact Reflection: Constraints must be a verbatim reflection of the source. If absent, output none.
+* **Schema Handling: If the source uses "SCHEMA"."TABLE", output only the table name, without the schema prefix If the source has no PK, do not generate a NOT NULL.(e.g., convert "CONTRACT_SYS"."CONTRACT_TERM_INFO" → CONTRACT_TERM_INFO).
+    Quotation Removal: Remove all double quotes from identifiers, including table names, column names, and role/user names. 
+    GRANT Statements: Retain all GRANT statements from the source, but remove any surrounding double quotes from the object and principal names.
 
-2. ### DATA TYPE MAPPING (STRICT)
-    * **NUMBER(p, s)** -> **DECIMAL(p, s)** (Mandatory: Do NOT use INT or BIGINT).
-    * **VARCHAR2(n BYTE/CHAR)** -> **VARCHAR(n)** (Mandatory: Do NOT use STRING).
-    * **CHAR(n BYTE/CHAR)** -> **CHAR(n)** (Mandatory: Do NOT use STRING).
-    * **DATE / TIMESTAMP** -> **DATE / TIMESTAMP** (Maintain as is).
-    * **CLOB / LONG / BLOB** -> **STRING**.
 
-3. ### CONVERSION STRATEGY HIERARCHY
-    * **Priority A (SQL-to-SQL):** Maintain a single-block `CREATE TABLE` structure whenever possible.
-    * **Priority B (Inlining):** Keep `DEFAULT` values and `NOT NULL` constraints inline within column definitions.
-    * **Priority C (Cleanup):** Strip Oracle-specific storage parameters (e.g., `TABLESPACE`, `PCTFREE`, `STORAGE`, `LOGGING`).
+**2. STRICT DATA TYPE MAPPING:**
 
-4. ### CODE REVIEW & QA
-    * HIGHLIGHT uncertain conversions with `/* REVIEW REQUIRED */`.
-    * Ensure no trailing commas before the closing parenthesis of the table.
-    * Maintain the exact casing and naming conventions from the Oracle source.
+* `NUMBER(p, s)` -> `DECIMAL(p, s)` (Mandatory: Do NOT use INT/BIGINT)
+* `VARCHAR2(n)` / `CHAR(n)` -> `VARCHAR(n)` / `CHAR(n)` (Mandatory: Do NOT use STRING)
+* `BFILE` -> `STRING`
+* `LONG RAW` / `BLOB` /  -> `BINARY`
+* `VARRAY` -> `ARRAY<STRING>`
+* `INTERVAL DAY TO SECOND` -> `INTERVAL DAY TO SECOND`
+* `INTERVAL YEAR TO MONTH` -> `INTERVAL YEAR TO MONTH`
+* `TIMESTAMP WITH TIME ZONE` -> `TIMESTAMP`
+* `DATE` / `TIMESTAMP` -> `DATE` / `TIMESTAMP`
+*  `SDO_GEOMETRY` -> `GEOMETRY`
 
----
+**3. OUTPUT FORMAT:**
+For each table, provide:
 
-### CONVERSION DECISION MATRIX:
-==========================
-IF (Source contains DDL for Tables/Indexes/Keys) THEN
-  -> Apply Strict Type Mapping (NUMBER to DECIMAL, VARCHAR2 to VARCHAR).
-  -> Move PK/FK to Table-Level Constraints.
-  -> Append 'USING DELTA;'.
-ELSE IF (Source contains PL/SQL Procedural Logic) THEN
-  -> Use Databricks SQL-compatible syntax.
-  -> Document logic changes in the Mapping Summary.
-
----
-
-### OUTPUT REQUIREMENTS:
-===================
-For each conversion, provide:
-1. **Converted Code:** The Databricks SQL in a single markdown block (```sql ... ```).
+1. **Converted Code:** Single markdown block with the Databricks SQL.
 2. **Mapping Summary:** A brief list of specific type and constraint changes.
 3. **Confidence Level:** HIGH/MEDIUM/LOW based on syntax complexity.
 
----
-
-### EXECUTION COMMAND:
-=================
-"Apply this production migration pipeline to the provided Oracle SQL. Strictly map NUMBER to DECIMAL and VARCHAR2 to VARCHAR. Move Primary Keys to table-level constraints and terminate the statement with 'USING DELTA;'. Do not provide external ALTER TABLE statements."
+**4. EXECUTION COMMAND:**
+"Apply this production migration pipeline to the provided Oracle SQL. Strictly map types according to the matrix, move keys to table-level, and terminate with 'USING DELTA;'. Do not provide external ALTER TABLE statements."
 
 **Input (Oracle):**
 [INSERT ORACLE SQL HERE]
